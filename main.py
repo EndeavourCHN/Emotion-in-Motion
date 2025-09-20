@@ -4,305 +4,306 @@ from matplotlib.backend_bases import MouseButton
 from matplotlib.widgets import Slider
 from scipy.interpolate import PchipInterpolator
 from matplotlib.collections import LineCollection
-# 新增: 导入必要的库
-import matplotlib.patheffects as pe # 用于让标签更清晰
-import time as time_module # 避免与numpy的time冲突
+import matplotlib.patheffects as pe
+import time as time_module
+import os
 
-# 解决中文显示问题
+# --- New: Import tkinter and additional matplotlib components ---
+import tkinter as tk
+from tkinter import simpledialog, messagebox, filedialog
+from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+
+# --- New: Helper function to find available icons ---
+def get_available_icons():
+    """Scans the 'icons' subdirectory and returns a list of filenames."""
+    icon_dir = 'icons'
+    if not os.path.isdir(icon_dir):
+        return []
+    try:
+        # Return a list of files in the directory
+        return [f for f in os.listdir(icon_dir) if os.path.isfile(os.path.join(icon_dir, f))]
+    except Exception as e:
+        print(f"Error reading icons directory: {e}")
+        return []
+
+# --- Updated: Custom Dialog Class for Label Input ---
+class LabelDialog(simpledialog.Dialog):
+    """A custom dialog to get a title, content, and an icon filename."""
+    def __init__(self, parent, title=None, current_title="", current_content="", current_icon=""):
+        self.current_title = current_title
+        self.current_content = current_content
+        self.current_icon = current_icon
+        self.result = None
+        self.available_icons = get_available_icons()
+        super().__init__(parent, title=title)
+
+    def body(self, master):
+        # Title Entry
+        tk.Label(master, text="Title:", anchor="w").grid(row=0, column=0, padx=5, sticky="w")
+        self.title_entry = tk.Entry(master, width=50)
+        self.title_entry.grid(row=1, column=0, padx=5, pady=(0, 10))
+        self.title_entry.insert(0, self.current_title)
+
+        # Content Text
+        tk.Label(master, text="Details:", anchor="w").grid(row=2, column=0, padx=5, sticky="w")
+        self.content_text = tk.Text(master, width=50, height=5)
+        self.content_text.grid(row=3, column=0, padx=5, pady=(0, 10))
+        self.content_text.insert("1.0", self.current_content)
+
+        # Icon Entry
+        tk.Label(master, text="Icon (e.g., happy.gif):", anchor="w").grid(row=4, column=0, padx=5, sticky="w")
+        self.icon_frame = tk.Frame(master)
+        self.icon_frame.grid(row=5, column=0, padx=5, pady=(0, 5), sticky="w")
+        
+        self.icon_entry = tk.Entry(self.icon_frame, width=40)
+        self.icon_entry.pack(side=tk.LEFT)
+        self.icon_entry.insert(0, self.current_icon)
+        
+        self.browse_button = tk.Button(self.icon_frame, text="Browse...", command=self.browse_icon)
+        self.browse_button.pack(side=tk.LEFT, padx=(5, 0))
+        
+        # Display available icons
+        if self.available_icons:
+            icon_list_str = "Available: " + ", ".join(self.available_icons)
+            tk.Label(master, text=icon_list_str, wraplength=300, justify="left").grid(row=6, column=0, padx=5, sticky="w")
+        else:
+            tk.Label(master, text="No 'icons' folder found or it is empty.", justify="left").grid(row=6, column=0, padx=5, sticky="w")
+
+        return self.title_entry # Initial focus
+
+    def browse_icon(self):
+        """Open file dialog to select a GIF file as icon."""
+        file_path = filedialog.askopenfilename(
+            title="Select Icon File",
+            filetypes=[("GIF files", "*.gif"), ("All files", "*.*")]
+        )
+        if file_path:
+            # Store the full path in the entry field
+            self.icon_entry.delete(0, tk.END)
+            self.icon_entry.insert(0, file_path)
+
+    def apply(self):
+        title = self.title_entry.get().strip()
+        content = self.content_text.get("1.0", "end-1c").strip()
+        icon = self.icon_entry.get().strip()
+        self.result = (title, content, icon)
+
+# --- Main script setup ---
 plt.rcParams['font.sans-serif'] = ['SimHei', 'FangSong', 'Microsoft YaHei']
 plt.rcParams['axes.unicode_minus'] = False
 
-# 设置时间点和初始振幅（直线）
-time = np.arange(24)  # 24小时
-amplitude = np.zeros(24)  # 初始化为0的直线
-
-# 添加: 创建整体偏移量变量
-offset = 0.0  # 整体偏移量，默认为0
-
-# 新增数据结构: 存储心情标签 {time_index: {'title': str, 'content': str, 'annotation': artist_object}}
+time = np.arange(24)
+amplitude = np.zeros(24)
+offset = 0.0
 emotion_labels = {}
 
-# 创建图形和坐标轴
 fig, ax = plt.subplots(figsize=(10, 6))
-plt.subplots_adjust(bottom=0.2)  # 为滑动条留出空间
+plt.subplots_adjust(bottom=0.2)
 
-# 绘制初始的平坦曲线（无点，仅线）
-line, = ax.plot(time, amplitude, linestyle='-', color='gray', label="Emotion Curve")
-# 添加: 在y=0处绘制浅灰色虚线作为基准线
+line, = ax.plot(time, amplitude, linestyle='-', color='gray')
 ax.axhline(y=0, color='lightgray', linestyle='--', linewidth=1)
-ax.set_title("Interactive Emotion Curve (Fixed with Pchip)") # Changed title for clarity
+ax.set_title("Interactive Emotion Curve")
 ax.set_xlabel("Time (t) [hours]")
 ax.set_ylabel("Amplitude (a)")
-ax.grid(False)  # 关闭背景表格
-
-# 修改: 去除外侧坐标框线
+ax.grid(False)
 ax.spines['top'].set_visible(False)
 ax.spines['right'].set_visible(False)
 ax.spines['bottom'].set_visible(False)
 ax.spines['left'].set_visible(False)
-
-# 修改: 更改左侧坐标标签为难过、一般、高兴
 ax.set_yticks([-2, 0, 2])
 ax.set_yticklabels(['难过', '一般', '高兴'])
 
-# 添加: 创建滑动条轴和滑动条
 ax_slider = plt.axes([0.2, 0.1, 0.6, 0.03], facecolor='lightgoldenrodyellow')
 offset_slider = Slider(ax_slider, 'Offset', -2, 2, valinit=0.0)
 
-# 存储当前被拖拽的点的索引
 dragging_index = None
-
-# 添加一个变量来存储当前的LineCollection和imshow对象
 current_lc = None
 gradient_image = None
-
-# 存储上次点击时间，用于判断双击
 last_click_time = 0.0
-DOUBLE_CLICK_TIME = 0.3 # 双击时间间隔（秒）
+DOUBLE_CLICK_TIME = 0.3
 
-# --- 标签管理函数 ---
-
+# --- Updated: Label Drawing Function ---
 def draw_labels():
-    """清除并重新绘制所有心情标签的标题。"""
-    # 移除旧的 Annotation 对象
-    for index in emotion_labels:
+    """Clear and redraw all text labels and icons."""
+    # Remove old artists first
+    for index in list(emotion_labels.keys()):
         if 'annotation' in emotion_labels[index] and emotion_labels[index]['annotation'] in ax.texts:
             emotion_labels[index]['annotation'].remove()
+        if 'icon_artist' in emotion_labels[index] and emotion_labels[index]['icon_artist'] in ax.artists:
+            emotion_labels[index]['icon_artist'].remove()
 
-    # 绘制新的 Annotation 对象
+    # Draw new artists
     for index, data in emotion_labels.items():
-        # 获取当前时间点的 y 值 (应用了偏移量)
         x_val = time[index]
         y_val = amplitude[index] + offset
-        title = data['title']
         
-        # 绘制 Annotation
+        # 1. Draw Text Annotation ( positioned below the icon )
         anno = ax.annotate(
-            title, 
-            (x_val, y_val), # 标签位置在数据点上
-            xytext=(0, 10), # 向上偏移10个点
-            textcoords="offset points",
-            ha='center', va='bottom',
-            fontsize=10, 
-            color='black',
+            data['title'], (x_val, y_val), xytext=(0, 0), textcoords="offset points",
+            ha='center', va='top', fontsize=10, color='black',
             bbox=dict(boxstyle="round,pad=0.3", fc="yellow", alpha=0.6, ec="orange", lw=1),
-            # 增加轮廓效果，让标签更清晰
             path_effects=[pe.withStroke(linewidth=2, foreground="white")]
         )
-        data['annotation'] = anno # 存储 Annotation 对象以便后续移除和点击检测
+        data['annotation'] = anno
 
-# --- 曲线绘制函数（更新后） ---
+        # 2. Draw Icon ( positioned above where the text will be )
+        icon_filename = data.get('icon')
+        if icon_filename:
+            # Check if it's a full path or just a filename
+            if os.path.exists(icon_filename):
+                icon_path = icon_filename  # It's a full path
+            else:
+                icon_path = os.path.join('icons', icon_filename)  # Assume it's in icons folder
+            
+            if os.path.exists(icon_path):
+                try:
+                    img = plt.imread(icon_path)
+                    # 修改图标缩放比例，使其与文字大小更匹配
+                    imagebox = OffsetImage(img, zoom=0.05) # 从0.5调整为0.15，使图标更小
+                    ab = AnnotationBbox(imagebox, (x_val, y_val),
+                                        xybox=(0., 30), # Position icon above the point
+                                        xycoords='data',
+                                        boxcoords="offset points",
+                                        frameon=False,
+                                        pad=0)
+                    ax.add_artist(ab)
+                    data['icon_artist'] = ab
+                except Exception as e:
+                    print(f"Could not load or display icon '{icon_path}': {e}")
+            else:
+                print(f"Warning: Icon file not found: {icon_path}")
 
-# 定义颜色映射的绝对范围
+
+# --- Curve Drawing and Core Logic (largely unchanged) ---
 MIN_Y_VAL = -3.0
 MAX_Y_VAL = 3.0
 
 def update_smooth_curve():
     global current_lc, gradient_image
-    
-    # --- 1. 插值和数据准备 ---
-    xnew = np.linspace(time.min(), time.max(), 300) # Increased resolution for smoother look
-    y_values = amplitude + offset
-    
-    extended_time = np.concatenate([[time[0]-1e-10], time, [time[-1]+1e-10]])
-    extended_y = np.concatenate([[y_values[0]], y_values, [y_values[-1]]])
-    
-    spline = PchipInterpolator(extended_time, extended_y)
-    ynew = spline(xnew)
-    
-    # --- 2. 颜色映射设置 ---
     from matplotlib.colors import LinearSegmentedColormap, Normalize
     
-    # 定义 Colormap 的节点：-3(Blue) -> 0(Grey) -> 3(Green)
-    cmap_nodes = [
-        (0.0, 'blue'),    # Y = -3
-        (0.5, 'gray'),    # Y = 0
-        (1.0, 'green')    # Y = 3
-    ]
+    xnew = np.linspace(time.min(), time.max(), 300)
+    y_values = amplitude + offset
+    spline = PchipInterpolator(np.concatenate([[time[0]-1e-10], time, [time[-1]+1e-10]]), 
+                               np.concatenate([[y_values[0]], y_values, [y_values[-1]]]))
+    ynew = spline(xnew)
+    
+    cmap_nodes = [(0.0, 'blue'), (0.5, 'gray'), (1.0, 'green')]
     custom_cmap = LinearSegmentedColormap.from_list("emotion_cmap", cmap_nodes)
     norm = Normalize(vmin=MIN_Y_VAL, vmax=MAX_Y_VAL) 
     
-    # --- 3. 移除旧的图形元素 ---
-    if gradient_image is not None:
-        gradient_image.remove()
-        gradient_image = None
-
-    if current_lc is not None:
-        current_lc.remove()
-        current_lc = None
-        
+    if gradient_image: gradient_image.remove()
+    if current_lc: current_lc.remove()
     line.set_data([], [])
 
-    # --- 4. 绘制填充区域（使用 imshow 和 Alpha 蒙版实现平滑渐变） ---
-    y_res = 100
-    x_res = len(xnew)
-
-    # 创建一个代表Y坐标的网格
+    y_res, x_res = 100, len(xnew)
     y_coords = np.linspace(MIN_Y_VAL, MAX_Y_VAL, y_res)
     Y_grid = np.tile(y_coords.reshape(-1, 1), (1, x_res))
-
-    # 使用 colormap 将Y坐标网格转换为 RGBA 图像
     rgba_image = custom_cmap(norm(Y_grid))
+    fill_mask = ((Y_grid > 0) & (Y_grid <= ynew)) | ((Y_grid < 0) & (Y_grid >= ynew))
+    alpha_values = 0.2 + 0.6 * (np.abs(Y_grid) / MAX_Y_VAL)
+    rgba_image[:, :, 3] = np.where(fill_mask, alpha_values, 0)
+    gradient_image = ax.imshow(rgba_image, aspect='auto', origin='lower',
+                               extent=(xnew.min(), xnew.max(), MIN_Y_VAL, MAX_Y_VAL), zorder=-1)
 
-    # 创建一个布尔蒙版，标记出曲线和y=0基准线之间的区域
-    # 通过广播 ynew (shape: 1, x_res) 到 Y_grid (shape: y_res, x_res) 进行比较
-    is_above_baseline = (Y_grid > 0) & (Y_grid <= ynew)
-    is_below_baseline = (Y_grid < 0) & (Y_grid >= ynew)
-    fill_mask = is_above_baseline | is_below_baseline
-
-    # 根据Y值的幅度计算透明度
-    abs_amp_norm = np.abs(Y_grid) / MAX_Y_VAL
-    alpha_values = 0.2 + 0.6 * abs_amp_norm
-
-    # 应用蒙版：只在填充区域内设置透明度，其他区域完全透明 (alpha=0)
-    final_alpha = np.where(fill_mask, alpha_values, 0)
-    rgba_image[:, :, 3] = final_alpha
-
-    # 使用 imshow 绘制带透明度的渐变图像
-    gradient_image = ax.imshow(
-        rgba_image,
-        aspect='auto',
-        origin='lower',
-        extent=(xnew.min(), xnew.max(), MIN_Y_VAL, MAX_Y_VAL),
-        zorder=-1
-    )
-
-    # --- 5. 绘制平滑曲线（使用 LineCollection 实现精确纵向渐变） ---
-    points = np.array([xnew, ynew]).T
-    segments_line = np.concatenate([points[:-1].reshape(-1, 1, 2), points[1:].reshape(-1, 1, 2)], axis=1)
-
-    lc = LineCollection(
-        segments_line, 
-        cmap=custom_cmap,
-        norm=norm,
-        linewidths=3, 
-        zorder=1
-    ) 
-    lc.set_array(ynew) 
+    points = np.array([xnew, ynew]).T.reshape(-1, 1, 2)
+    segments = np.concatenate([points[:-1], points[1:]], axis=1)
+    lc = LineCollection(segments, cmap=custom_cmap, norm=norm, linewidths=3, zorder=1)
+    lc.set_array(ynew)
     ax.add_collection(lc)
     current_lc = lc
     
-    # 重新设置Y轴范围
     ax.relim()
     ax.set_ylim(-3, 3) 
-    
-    # 每次曲线更新时，也更新标签位置
     draw_labels()
-
-# --- 滑动条更新函数 ---
 
 def update_offset(val):
     global offset
     offset = val
     update_smooth_curve()
     fig.canvas.draw()
-
-# --- 鼠标事件处理函数 ---
-
-# 鼠标点击事件，开始拖拽 或 检查双击
-def on_click(event):
-    global dragging_index, last_click_time
     
-    current_time = time_module.time()
-    # 判断是否为双击
-    if current_time - last_click_time < DOUBLE_CLICK_TIME:
-        on_double_click(event)
-        last_click_time = 0.0 # 重置，避免三击
-        return
+# --- Updated: Centralized Label Editing Logic ---
+def handle_label_edit(time_index):
+    """Opens a dialog to edit a label for a given time index."""
+    root = tk.Tk()
+    root.withdraw()
+
+    current_data = emotion_labels.get(time_index, {})
+    current_title = current_data.get('title', '')
+    current_content = current_data.get('content', '')
+    current_icon = current_data.get('icon', '')
+
+    dialog = LabelDialog(root, title=f"Edit Label for {int(time[time_index])}h",
+                         current_title=current_title, current_content=current_content, current_icon=current_icon)
     
-    last_click_time = current_time
-
-    # 1. 尝试点击标签
-    if event.inaxes == ax and event.xdata is not None and event.ydata is not None:
-        for index, data in emotion_labels.items():
-            anno = data.get('annotation')
-            if anno and anno.contains(event)[0]: # 检查点击是否在 Annotation 对象的边界内
-                on_label_click(index, data)
-                return # 标签被点击，不进行拖拽逻辑
-
-    # 2. 尝试拖拽数据点
-    if event.button is MouseButton.LEFT and event.xdata is not None:
-        # 只在曲线所在的坐标轴内进行操作
-        if event.inaxes == ax:
-            distances = np.abs(time - event.xdata)
-            dragging_index = np.argmin(distances)
-            print(f"Start dragging point {dragging_index} at time {time[dragging_index]}")
-
-# 鼠标双击事件：添加心情标签
-def on_double_click(event):
-    if event.inaxes == ax and event.xdata is not None and event.ydata is not None:
-        # 确定最近的时间点索引
-        distances = np.abs(time - event.xdata)
-        time_index = np.argmin(distances)
+    if dialog.result:
+        title, content, icon = dialog.result
         
-        print(f"\n--- Adding/Editing Label for Time {time[time_index]} ---")
-        
-        # 检查是否已存在标签
-        current_title = emotion_labels.get(time_index, {}).get('title', '')
-        current_content = emotion_labels.get(time_index, {}).get('content', '')
-
-        # 使用 input() 模拟对话框
-        title = input(f"Enter Title for {int(time[time_index])}h (Current: '{current_title}'): ").strip()
-        content = input(f"Enter Details for {int(time[time_index])}h (Current: '{current_content}'): ").strip()
-
         if title:
-            # 更新或新增标签
-            emotion_labels[time_index] = {'title': title, 'content': content}
-            print(f"Label added/updated: {title}")
+            emotion_labels[time_index] = {'title': title, 'content': content, 'icon': icon}
+            print(f"Label at {int(time[time_index])}h updated to '{title}'")
         elif time_index in emotion_labels:
-            # 标题为空，删除标签
-            if input("Title is empty. Do you want to DELETE this label? (y/n): ").lower() == 'y':
-                if 'annotation' in emotion_labels[time_index]:
-                    emotion_labels[time_index]['annotation'].remove()
+            if messagebox.askyesno("Confirm Delete", "Title is empty. Do you want to DELETE this label?"):
                 del emotion_labels[time_index]
                 print(f"Label at {int(time[time_index])}h deleted.")
         
         update_smooth_curve()
         fig.canvas.draw()
-        print("--------------------------------------------------\n")
+    root.destroy()
 
-# 鼠标单击标签事件：查看并允许修改
-def on_label_click(index, data):
-    print(f"\n--- View/Edit Label at Time {int(time[index])}h ---")
-    print(f"Title: {data['title']}")
-    print(f"Content: {data['content']}")
-    
-    # 询问是否修改
-    if input("Do you want to MODIFY this label? (y/n): ").lower() == 'y':
-        # 调用双击逻辑来处理修改
-        # 构造一个模拟事件（只需要time_index）
-        class MockEvent:
-            def __init__(self, xdata):
-                self.inaxes = ax
-                self.xdata = xdata
-                self.ydata = amplitude[index] # ydata不重要，但需要是非None
-        
-        on_double_click(MockEvent(time[index]))
-    print("--------------------------------------------------\n")
+# --- Event Handlers (Updated) ---
+def on_click(event):
+    global dragging_index, last_click_time
+    current_time = time_module.time()
+    if current_time - last_click_time < DOUBLE_CLICK_TIME:
+        on_double_click(event)
+        last_click_time = 0.0
+        return
+    last_click_time = current_time
 
-# 鼠标拖动事件，修改选中点的振幅
+    if event.inaxes == ax and event.xdata is not None:
+        for index, data in emotion_labels.items():
+            anno = data.get('annotation')
+            if anno and anno.contains(event)[0]:
+                on_label_click(index)
+                return
+
+    if event.button is MouseButton.LEFT and event.xdata is not None and event.inaxes == ax:
+        dragging_index = np.argmin(np.abs(time - event.xdata))
+
+def on_double_click(event):
+    if event.inaxes == ax and event.xdata is not None:
+        time_index = np.argmin(np.abs(time - event.xdata))
+        handle_label_edit(time_index)
+
+def on_label_click(index):
+    data = emotion_labels[index]
+    root = tk.Tk()
+    root.withdraw()
+    should_modify = messagebox.askyesno(
+        title=f"Label at {int(time[index])}h",
+        message=f"Title: {data['title']}\nIcon: {data.get('icon', 'N/A')}\n\nDetails: {data['content']}\n\nDo you want to modify this label?"
+    )
+    root.destroy()
+    if should_modify:
+        handle_label_edit(index)
+
 def on_drag(event):
     if dragging_index is not None and event.ydata is not None and event.inaxes == ax:
         amplitude[dragging_index] = event.ydata
         update_smooth_curve()
         fig.canvas.draw()
 
-# 鼠标释放事件，结束拖拽
 def on_release(event):
     global dragging_index
-    dragging_index = None
-    # print("Released drag")
+    if event.button is MouseButton.LEFT:
+        dragging_index = None
 
-# 连接鼠标事件
+# --- Connect events and show plot ---
 fig.canvas.mpl_connect('button_press_event', on_click)
 fig.canvas.mpl_connect('motion_notify_event', on_drag)
 fig.canvas.mpl_connect('button_release_event', on_release)
-
-# 添加: 连接滑动条事件
 offset_slider.on_changed(update_offset)
-
-# 初始平滑曲线
 update_smooth_curve()
-
-# 显示图形
 plt.show()
